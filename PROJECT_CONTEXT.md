@@ -1,11 +1,19 @@
 # Health Tracker — Project Context
 
 ## Stack
-- Frontend: Next.js 14 App Router, Tailwind CSS, TypeScript
-- Backend: Express.js
+- Frontend: Next.js **16.2.7** App Router, Tailwind CSS v4, TypeScript
+- Backend: Express.js v5
 - Database: PostgreSQL (Docker)
 - ORM: Prisma 7
 - Monorepo: /frontend and /backend folders at project root
+
+## CRITICAL: Next.js 16 differences from Next.js 14
+- **`middleware.ts` is DEPRECATED and RENAMED to `proxy.ts`**
+  - File must be at `frontend/proxy.ts` (project root, same level as `app/`)
+  - Exported function must be named `proxy` (not `middleware`)
+  - `export const config = { matcher: [...] }` still works the same way
+- Always read `frontend/node_modules/next/dist/docs/` before writing Next.js code
+- AGENTS.md in frontend says: "Heed deprecation notices"
 
 ## Prisma 7 quirks (important)
 - Datasource config lives in `prisma.config.ts`, NOT in `schema.prisma`
@@ -39,10 +47,43 @@
 - Has: Chest, Triceps, Back, Biceps, Legs, Shoulders muscle groups
 - Has: 2 chest sessions (May 19, June 05) and 1 triceps session (June 05) with full sets
 
+## Authentication (implemented)
+- Backend: JWT via `jsonwebtoken`. Secret in `backend/.env` as `JWT_SECRET`
+- Middleware: `backend/middleware/auth.js` — reads `Authorization: Bearer <token>`, verifies JWT, attaches `req.user.userId`
+- All API endpoints are protected with `authenticate` middleware
+- Token payload: `{ userId: number }`
+- Tokens expire in 7 days
+
+### Auth endpoints
+- `POST /api/auth/register` — body: `{ name, email, password }` → returns `{ token, user: { id, name, email } }`
+- `POST /api/auth/login` — body: `{ email, password }` → returns `{ token, user: { id, name, email } }` or 401
+
+### Frontend auth architecture
+- **`frontend/lib/auth.ts`** — `saveToken(token)`, `getToken()`, `removeToken()`, `isLoggedIn()`, `getUserId()`
+  - `saveToken` saves to localStorage AND sets a non-HttpOnly flag cookie `auth_flag=1` (so proxy.ts can read it server-side)
+  - `removeToken` clears both localStorage and the cookie
+  - `getUserId()` decodes JWT payload client-side via `atob()` — no verification (backend verifies)
+- **`frontend/lib/api.ts`** — `apiFetch(path, init?)` wrapper around fetch
+  - Automatically adds `Authorization: Bearer <token>` header
+  - Always sets `Content-Type: application/json`
+  - On 401: calls `removeToken()` and redirects to `/login`
+  - Use `apiFetch` for ALL API calls in the app (never raw `fetch` to the backend)
+- **`frontend/proxy.ts`** — route guard (Next.js 16 proxy, replaces middleware.ts)
+  - Unauthenticated user → /dashboard redirects to /login
+  - Authenticated user → /login or /register redirects to /dashboard
+  - Reads `auth_flag` cookie (set by `saveToken`)
+
+### Auth pages
+- `/login` — `frontend/app/login/page.tsx`
+- `/register` — `frontend/app/register/page.tsx`
+
 ## Frontend pages
-- /dashboard — main page with two tabs
+- `/login` — email + password sign-in form
+- `/register` — name + email + password registration form
+- `/dashboard` — main page with two tabs (protected by proxy.ts)
   - Tab 1 Overview: stat cards + exercise calendar
   - Tab 2 Workout log: muscle group selector + session navigator
+  - Top bar has "Log workout" button + logout button (ti-logout icon)
 
 ## Components built
 - StatCard.tsx — stat card with value, label, icon (tabler), sub text
@@ -71,59 +112,68 @@ type MuscleGroup = { id: number; name: string; sessions: Session[] }
   https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css
 - Cards: white bg, 0.5px border-gray-100, rounded-xl
 - Buttons: bg-teal-700 text-teal-50 rounded-lg
+- All inputs: `text-base` (16px minimum) to prevent iOS auto-zoom on focus
 
-## API endpoints (all implemented in backend/index.js)
+## API endpoints (all in backend/index.js, all require Bearer token)
 
-### GET /api/muscle-groups
-Returns all muscle groups for userId=1 with nested sessions → exercises → sets.
+### POST /api/auth/register (public)
+```json
+{ "name": "Vishal", "email": "v@example.com", "password": "pass" }
+→ { "token": "...", "user": { "id": 2, "name": "Vishal", "email": "v@example.com" } }
+```
+
+### POST /api/auth/login (public)
+```json
+{ "email": "ishu@example.com", "password": "password123" }
+→ { "token": "...", "user": { "id": 1, "name": "Ishu", "email": "ishu@example.com" } }
+```
+
+### GET /api/muscle-groups (auth required)
+Returns all muscle groups for the authenticated user with nested sessions → exercises → sets.
 Dates formatted as "Tuesday, May 19, 2026" (US locale, UTC timezone).
 ```json
 [{ "id": 1, "name": "Chest", "sessions": [...] }]
 ```
 
-### GET /api/stats
-Returns stat card data for userId=1:
+### GET /api/stats (auth required)
 ```json
 { "gymSessions": 3, "exerciseDays": 2, "dayStreak": 0 }
 ```
 
-### GET /api/sessions
-Returns unique ISO date strings for all sessions (userId=1). Used by ExerciseCalendar.
+### GET /api/sessions (auth required)
+Returns unique ISO date strings for all sessions. Used by ExerciseCalendar.
 ```json
 ["2026-05-19", "2026-06-05"]
 ```
 
-### GET /api/exercises?muscleGroupId=1
+### GET /api/exercises?muscleGroupId=1 (auth required)
 Returns exercise definitions for a muscle group (for LogSessionModal step 2):
 ```json
 [{ "id": 1, "name": "Bench press" }, ...]
 ```
 
-### GET /api/exercise-definitions
-Returns all muscle groups with their exercises grouped (used internally):
+### GET /api/exercise-definitions (auth required)
+Returns all muscle groups with their exercises grouped:
 ```json
 [{ "id": 1, "name": "Chest", "exercises": [...] }]
 ```
 
-### POST /api/exercise-definitions
-Adds a new exercise to a muscle group (called from LogSessionModal "Add new exercise"):
+### POST /api/exercise-definitions (auth required)
+Adds a new exercise to a muscle group:
 ```json
 { "name": "Pec deck", "muscleGroupId": 1 }
 ```
 
-### POST /api/sessions
-Creates a full session with exercises and sets in one call:
+### POST /api/sessions (auth required)
+Creates a full session. userId comes from the JWT — do NOT send it in the body.
 ```json
 {
-  "userId": 1,
   "muscleGroupId": 1,
   "date": "2026-06-09",
   "exercises": [
     {
       "exerciseDefinitionId": 1,
-      "sets": [
-        { "setNumber": 1, "weight": 10, "reps": 8 }
-      ]
+      "sets": [{ "setNumber": 1, "weight": 10, "reps": 8 }]
     }
   ]
 }
@@ -151,8 +201,7 @@ Two-step modal (`LogSessionModal.tsx`) triggered from:
 - Each muscle group is a SEPARATE session even if trained same day
   (e.g. Monday = Chest session + Triceps session, both dated Monday)
 - Muscle groups and exercise definitions are DB-driven, not hardcoded
-- All data is user-scoped — every query must filter by userId
-- userId is hardcoded to 1 everywhere until auth is added
+- All data is user-scoped — every query filters by userId from JWT (never hardcoded)
 
 ## Training split (for seed data reference)
 - Mon/Thu: Chest + Triceps
@@ -163,34 +212,16 @@ Two-step modal (`LogSessionModal.tsx`) triggered from:
 ## Known bugs fixed
 - SessionView crash when switching muscle groups: index clamped with `Math.min(currentIndex, sessions.length - 1)` during render instead of relying on useEffect (which fires after render)
 
-## Next steps in order
+## Progress
 1. ~~Build Express API endpoints~~ ✓
 2. ~~Connect Next.js frontend to API (replace hardcoded data)~~ ✓
 3. ~~Build log session form (two-step flow)~~ ✓
-4. Add authentication (login/register pages, JWT)
+4. ~~Add authentication (login/register pages, JWT)~~ ✓
 5. Mobile-friendly layout pass
 
-
-## Current session status (June 09 2026)
-- UI loads on iPhone at http://192.168.1.132:3000 ✓
-- Network access confirmed working ✓
-- Frontend still using hardcoded data
-- Backend has no endpoints yet
-
-## Immediate next steps (in this order)
-1. Build Express API endpoints
-2. Connect frontend to API
-3. Mobile layout pass
-4. Test full app on iPhone
-5. Build log session form
-6. Authentication
-
-## Environment setup for API connection
-Create frontend/.env.local with:
-NEXT_PUBLIC_API_URL=http://192.168.1.132:5000
-
-All API calls must use:
-const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/...`)
-
-This works from both laptop browser and iPhone on same WiFi.
-Backend must run with npm run dev from /backend folder.
+## Environment
+- Backend runs on port 5000: `npm run dev` from `/backend`
+- Frontend runs on port 3000: `npm run dev` from `/frontend`
+- `frontend/.env.local` must have: `NEXT_PUBLIC_API_URL=http://192.168.1.132:5000`
+  (use LAN IP so both laptop browser and iPhone on same WiFi can reach backend)
+- `backend/.env` has `DATABASE_URL` and `JWT_SECRET`

@@ -15,6 +15,7 @@ const MONTH_NAMES = [
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
 export default function ExerciseCalendar({ exercisedDates }: CalendarProps) {
+  const dates = Array.isArray(exercisedDates) ? exercisedDates : []
   const today = new Date()
 
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
@@ -50,7 +51,7 @@ export default function ExerciseCalendar({ exercisedDates }: CalendarProps) {
   function isExercised(day: number): boolean {
     const mm = String(currentMonth + 1).padStart(2, '0')
     const dd = String(day).padStart(2, '0')
-    return exercisedDates.includes(`${currentYear}-${mm}-${dd}`)
+    return dates.includes(`${currentYear}-${mm}-${dd}`)
   }
 
   function isPast(day: number): boolean {

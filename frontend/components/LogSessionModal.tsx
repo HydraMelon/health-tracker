@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000'
+import { apiFetch } from '@/lib/api'
 
 type MuscleGroupOption = { id: number; name: string }
 type ExerciseOption    = { id: number; name: string }
@@ -41,7 +40,7 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
   async function goToStep2() {
     if (!muscleGroupId) return
     try {
-      const res  = await fetch(`${API_BASE}/api/exercises?muscleGroupId=${muscleGroupId}`)
+      const res  = await apiFetch(`/api/exercises?muscleGroupId=${muscleGroupId}`)
       const data: ExerciseOption[] = await res.json()
       setExercises(data.map(e => ({ ...e, selected: false, sets: [] })))
       setStep(2)
@@ -86,10 +85,9 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
     const name = newExerciseName.trim()
     if (!name || !muscleGroupId) return
     try {
-      const res = await fetch(`${API_BASE}/api/exercise-definitions`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ name, muscleGroupId }),
+      const res = await apiFetch(`/api/exercise-definitions`, {
+        method: 'POST',
+        body:   JSON.stringify({ name, muscleGroupId }),
       })
       const newEx: ExerciseOption = await res.json()
       setExercises(prev => [...prev, { ...newEx, selected: true, sets: [{ setNumber: 1, weight: '', reps: '' }] }])
@@ -107,11 +105,9 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/sessions`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await apiFetch(`/api/sessions`, {
+        method: 'POST',
         body: JSON.stringify({
-          userId: 1,
           muscleGroupId,
           date,
           exercises: selected.map(e => ({

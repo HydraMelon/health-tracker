@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import StatCard from '@/components/StatCard'
 import ExerciseCalendar from '@/components/ExerciseCalendar'
 import WorkoutLog from '@/components/WorkoutLog'
 import LogSessionModal from '@/components/LogSessionModal'
 import { MuscleGroup } from '@/types/workout'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000'
+import { apiFetch } from '@/lib/api'
+import { removeToken } from '@/lib/auth'
 
 type Stats = {
   gymSessions:  number
@@ -18,6 +19,7 @@ type Stats = {
 const TABS = ['Overview', 'Workout log']
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [activeTab,       setActiveTab]       = useState(0)
   const [muscleGroups,    setMuscleGroups]    = useState<MuscleGroup[]>([])
   const [exercisedDates,  setExercisedDates]  = useState<string[]>([])
@@ -31,14 +33,15 @@ export default function DashboardPage() {
     if (!silent) setLoading(true)
     try {
       const [groups, dates, statsData] = await Promise.all([
-        fetch(`${API_BASE}/api/muscle-groups`).then(r => r.json()),
-        fetch(`${API_BASE}/api/sessions`).then(r => r.json()),
-        fetch(`${API_BASE}/api/stats`).then(r => r.json()),
+        apiFetch('/api/muscle-groups').then(r => r.json()),
+        apiFetch('/api/sessions').then(r => r.json()),
+        apiFetch('/api/stats').then(r => r.json()),
       ])
       setMuscleGroups(groups)
       setExercisedDates(dates)
       setStats(statsData)
     } catch (err: unknown) {
+      if (err instanceof Error && err.message === 'Unauthorized') return
       setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
       setLoading(false)
@@ -50,6 +53,11 @@ export default function DashboardPage() {
   function openModal(muscleGroupId?: number) {
     setModalGroupId(muscleGroupId)
     setModalOpen(true)
+  }
+
+  function logout() {
+    removeToken()
+    router.push('/login')
   }
 
   const statCards = stats
@@ -64,22 +72,31 @@ export default function DashboardPage() {
   return (
     <main className="w-full max-w-3xl mx-auto px-4 py-6 sm:py-8">
 
-      {/* Top bar — stacks vertically on mobile */}
+      {/* Top bar */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-7">
         <div>
           <h1 className="text-xl font-medium text-gray-900">Health tracker</h1>
           <p className="text-sm text-gray-400 mt-0.5">Your wellness at a glance</p>
         </div>
-        <button
-          onClick={() => openModal()}
-          className="flex items-center justify-center gap-1.5 bg-teal-700 hover:bg-teal-800 text-teal-50 text-sm font-medium px-4 min-h-[44px] rounded-lg sm:w-auto w-full"
-        >
-          <i className="ti ti-plus" aria-hidden="true" />
-          Log workout
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => openModal()}
+            className="flex items-center justify-center gap-1.5 bg-teal-700 hover:bg-teal-800 text-teal-50 text-sm font-medium px-4 min-h-[44px] rounded-lg sm:w-auto w-full"
+          >
+            <i className="ti ti-plus" aria-hidden="true" />
+            Log workout
+          </button>
+          <button
+            onClick={logout}
+            className="flex items-center justify-center gap-1.5 border border-gray-200 text-gray-500 hover:bg-gray-50 text-sm font-medium px-4 min-h-[44px] rounded-lg"
+            title="Sign out"
+          >
+            <i className="ti ti-logout" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
-      {/* Tabs — 44px touch targets */}
+      {/* Tabs */}
       <div className="flex gap-0 border-b border-gray-100 mb-7">
         {TABS.map((tab, i) => (
           <button

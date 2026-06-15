@@ -1,7 +1,11 @@
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { PrismaClient } = require('@prisma/client');
+const { authenticate } = require('./middleware/auth');
+const logger = require('./logger');
 require('dotenv').config();
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
@@ -11,12 +15,69 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+// ── Request logging ───────────────────────────────────────────────────────────
 
-app.get('/api/muscle-groups', async (req, res) => {
+app.use((req, _res, next) => {
+  logger.info(`${req.method} ${req.path}`);
+  next();
+});
+
+// ── Health ────────────────────────────────────────────────────────────────────
+
+app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+app.post('/api/auth/register', async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'name, email and password required' });
+  }
+
+  try {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(400).json({ error: 'Email already in use' });
+
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { name, email, password: hashed },
+    });
+
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  } catch (err) {
+    logger.error(`POST /api/auth/register — ${err.message}`, { stack: err.stack });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'email and password required' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  } catch (err) {
+    logger.error(`POST /api/auth/login — ${err.message}`, { stack: err.stack });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Protected endpoints ───────────────────────────────────────────────────────
+
+app.get('/api/muscle-groups', authenticate, async (req, res) => {
   try {
     const groups = await prisma.muscleGroup.findMany({
-      where: { userId: 1 },
+      where: { userId: req.user.userId },
       include: {
         sessions: {
           orderBy: { date: 'asc' },
@@ -52,15 +113,15 @@ app.get('/api/muscle-groups', async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error(err);
+    logger.error(`GET /api/muscle-groups — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', authenticate, async (req, res) => {
   try {
     const sessions = await prisma.session.findMany({
-      where: { userId: 1 },
+      where: { userId: req.user.userId },
       select: { date: true },
     });
 
@@ -93,30 +154,30 @@ app.get('/api/stats', async (req, res) => {
 
     res.json({ gymSessions, exerciseDays, dayStreak });
   } catch (err) {
-    console.error(err);
+    logger.error(`GET /api/stats — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.get('/api/sessions', async (req, res) => {
+app.get('/api/sessions', authenticate, async (req, res) => {
   try {
     const sessions = await prisma.session.findMany({
-      where: { userId: 1 },
+      where: { userId: req.user.userId },
       select: { date: true },
     });
 
     const uniqueDates = [...new Set(sessions.map(s => s.date.toISOString().split('T')[0]))];
     res.json(uniqueDates);
   } catch (err) {
-    console.error(err);
+    logger.error(`GET /api/sessions — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.get('/api/exercise-definitions', async (req, res) => {
+app.get('/api/exercise-definitions', authenticate, async (req, res) => {
   try {
     const muscleGroups = await prisma.muscleGroup.findMany({
-      where: { userId: 1 },
+      where: { userId: req.user.userId },
       include: {
         exerciseDefinitions: {
           select: { id: true, name: true },
@@ -132,12 +193,12 @@ app.get('/api/exercise-definitions', async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error(err);
+    logger.error(`GET /api/exercise-definitions — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.get('/api/exercises', async (req, res) => {
+app.get('/api/exercises', authenticate, async (req, res) => {
   const muscleGroupId = parseInt(req.query.muscleGroupId);
   if (!muscleGroupId) return res.status(400).json({ error: 'muscleGroupId required' });
 
@@ -149,12 +210,12 @@ app.get('/api/exercises', async (req, res) => {
     });
     res.json(exercises);
   } catch (err) {
-    console.error(err);
+    logger.error(`GET /api/exercises — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.post('/api/exercise-definitions', async (req, res) => {
+app.post('/api/exercise-definitions', authenticate, async (req, res) => {
   const { name, muscleGroupId } = req.body;
   if (!name || !muscleGroupId) return res.status(400).json({ error: 'name and muscleGroupId required' });
 
@@ -164,15 +225,17 @@ app.post('/api/exercise-definitions', async (req, res) => {
     });
     res.status(201).json(exercise);
   } catch (err) {
-    console.error(err);
+    logger.error(`POST /api/exercise-definitions — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.post('/api/sessions', async (req, res) => {
-  const { userId, muscleGroupId, date, exercises } = req.body;
-  if (!userId || !muscleGroupId || !date || !exercises?.length) {
-    return res.status(400).json({ error: 'userId, muscleGroupId, date, exercises required' });
+app.post('/api/sessions', authenticate, async (req, res) => {
+  const { muscleGroupId, date, exercises } = req.body;
+  const userId = req.user.userId;
+
+  if (!muscleGroupId || !date || !exercises?.length) {
+    return res.status(400).json({ error: 'muscleGroupId, date, exercises required' });
   }
 
   try {
@@ -198,9 +261,16 @@ app.post('/api/sessions', async (req, res) => {
 
     res.status(201).json({ id: session.id });
   } catch (err) {
-    console.error(err);
+    logger.error(`POST /api/sessions — ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.listen(5000, '0.0.0.0', () => console.log('Server running on port 5000'));
+// ── Unhandled errors ──────────────────────────────────────────────────────────
+
+app.use((err, _req, res, _next) => {
+  logger.error(`Unhandled error — ${err.message}`, { stack: err.stack });
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+app.listen(5000, '0.0.0.0', () => logger.info('Server running on port 5000'));
