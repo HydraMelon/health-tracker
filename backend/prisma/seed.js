@@ -2,7 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
-const adapter = new PrismaPg({ connectionString: 'postgresql://health-tracker:secret@localhost:5432/health_db' })
+//const adapter = new PrismaPg({ connectionString: 'postgresql://health-tracker:secret@localhost:5432/health_db' })
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
