@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 type CalendarProps = {
   exercisedDates: string[]   // ISO date strings e.g. "2026-05-19"
+  onMarkDay?:     (date: string) => void
 }
 
 const MONTH_NAMES = [
@@ -14,7 +15,7 @@ const MONTH_NAMES = [
 
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
-export default function ExerciseCalendar({ exercisedDates }: CalendarProps) {
+export default function ExerciseCalendar({ exercisedDates, onMarkDay }: CalendarProps) {
   const dates = Array.isArray(exercisedDates) ? exercisedDates : []
   const today = new Date()
 
@@ -132,21 +133,32 @@ export default function ExerciseCalendar({ exercisedDates }: CalendarProps) {
         ))}
 
         {allDays.map(day => {
-          const exercised = isExercised(day) && isPast(day)
-          const past      = isPast(day) && !exercised
-          const future    = !isPast(day)
-          const today_    = isToday(day)
+          const exercised  = isExercised(day) && isPast(day)
+          const past       = isPast(day) && !exercised
+          const future     = !isPast(day)
+          const today_     = isToday(day)
+          const canMark    = past && !future && onMarkDay
+
+          function handleDayClick() {
+            if (!canMark) return
+            const mm   = String(currentMonth + 1).padStart(2, '0')
+            const dd   = String(day).padStart(2, '0')
+            onMarkDay!(`${currentYear}-${mm}-${dd}`)
+          }
 
           return (
             <div
               key={day}
+              onClick={handleDayClick}
+              title={canMark ? 'Mark as exercised' : undefined}
               className={`
                 aspect-square flex items-center justify-center
                 rounded-lg text-xs font-medium
-                ${exercised ? 'bg-teal-50 text-teal-800'  : ''}
-                ${past      ? 'text-gray-400'              : ''}
-                ${future    ? 'text-gray-200'              : ''}
-                ${today_    ? 'ring-1 ring-teal-500'       : ''}
+                ${exercised ? 'bg-teal-50 text-teal-800'                          : ''}
+                ${past      ? 'text-gray-400'                                      : ''}
+                ${future    ? 'text-gray-200'                                      : ''}
+                ${today_    ? 'ring-1 ring-teal-500'                               : ''}
+                ${canMark   ? 'cursor-pointer hover:bg-gray-50 hover:text-gray-600': ''}
               `}
             >
               {day}

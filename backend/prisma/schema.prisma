@@ -25,6 +25,7 @@ model MuscleGroup {
   user                User                  @relation(fields: [userId], references: [id])
   exerciseDefinitions ExerciseDefinition[]
   sessions            Session[]
+
 }
 
 model ExerciseDefinition {

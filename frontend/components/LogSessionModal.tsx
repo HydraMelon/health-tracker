@@ -13,14 +13,20 @@ type Props = {
   onClose:               () => void
   muscleGroups:          MuscleGroupOption[]
   defaultMuscleGroupId?: number
+  defaultDate?:          string
   onSaved:               () => void
 }
 
-export default function LogSessionModal({ open, onClose, muscleGroups, defaultMuscleGroupId, onSaved }: Props) {
+export default function LogSessionModal({
+  open, onClose, muscleGroups, defaultMuscleGroupId, defaultDate, onSaved,
+}: Props) {
   const [step,            setStep]            = useState<1 | 2>(1)
+  const [groups,          setGroups]          = useState<MuscleGroupOption[]>([])
   const [muscleGroupId,   setMuscleGroupId]   = useState<number | null>(null)
   const [date,            setDate]            = useState('')
   const [exercises,       setExercises]       = useState<ExerciseEntry[]>([])
+  const [newGroupName,    setNewGroupName]    = useState('')
+  const [addingGroup,     setAddingGroup]     = useState(false)
   const [newExerciseName, setNewExerciseName] = useState('')
   const [saving,          setSaving]          = useState(false)
   const [error,           setError]           = useState<string | null>(null)
@@ -28,14 +34,38 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
   useEffect(() => {
     if (open) {
       setStep(1)
+      setGroups(muscleGroups)
       setMuscleGroupId(defaultMuscleGroupId ?? null)
-      setDate(new Date().toISOString().split('T')[0])
+      setDate(defaultDate ?? new Date().toISOString().split('T')[0])
       setExercises([])
+      setNewGroupName('')
+      setAddingGroup(false)
       setNewExerciseName('')
       setSaving(false)
       setError(null)
     }
-  }, [open, defaultMuscleGroupId])
+  }, [open, muscleGroups, defaultMuscleGroupId, defaultDate])
+
+  async function addMuscleGroup() {
+    const name = newGroupName.trim()
+    if (!name) return
+    setAddingGroup(true)
+    setError(null)
+    try {
+      const res  = await apiFetch('/api/muscle-groups', {
+        method: 'POST',
+        body:   JSON.stringify({ name }),
+      })
+      const group: MuscleGroupOption = await res.json()
+      setGroups(prev => [...prev, group])
+      setMuscleGroupId(group.id)
+      setNewGroupName('')
+    } catch {
+      setError('Could not add muscle group')
+    } finally {
+      setAddingGroup(false)
+    }
+  }
 
   async function goToStep2() {
     if (!muscleGroupId) return
@@ -85,7 +115,7 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
     const name = newExerciseName.trim()
     if (!name || !muscleGroupId) return
     try {
-      const res = await apiFetch(`/api/exercise-definitions`, {
+      const res = await apiFetch('/api/exercise-definitions', {
         method: 'POST',
         body:   JSON.stringify({ name, muscleGroupId }),
       })
@@ -100,12 +130,11 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
   async function saveSession() {
     if (!muscleGroupId) return
     const selected = exercises.filter(e => e.selected && e.sets.length > 0)
-    if (!selected.length) return
 
     setSaving(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/sessions`, {
+      const res = await apiFetch('/api/sessions', {
         method: 'POST',
         body: JSON.stringify({
           muscleGroupId,
@@ -114,8 +143,8 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
             exerciseDefinitionId: e.id,
             sets: e.sets.map(s => ({
               setNumber: s.setNumber,
-              weight:    parseFloat(s.weight)  || 0,
-              reps:      parseInt(s.reps, 10)  || 0,
+              weight:    parseFloat(s.weight) || 0,
+              reps:      parseInt(s.reps, 10) || 0,
             })),
           })),
         }),
@@ -129,7 +158,7 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
     }
   }
 
-  const canSave = exercises.some(e => e.selected && e.sets.length > 0)
+  const hasExercises = exercises.some(e => e.selected && e.sets.length > 0)
 
   if (!open) return null
 
@@ -145,7 +174,6 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
             <h2 className="text-base font-medium text-gray-900">Log session</h2>
             <p className="text-xs text-gray-400 mt-0.5">Step {step} of 2</p>
           </div>
-          {/* 44px close button */}
           <button
             onClick={onClose}
             className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-gray-50"
@@ -161,11 +189,17 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
             <p className="text-sm text-red-500 mb-3">{error}</p>
           )}
 
+          {/* ── Step 1 ── */}
           {step === 1 && (
             <>
               <p className="text-xs font-medium text-gray-500 mb-2">Muscle group</p>
-              <div className="flex flex-wrap gap-2 mb-5">
-                {muscleGroups.map(g => (
+
+              {groups.length === 0 && (
+                <p className="text-xs text-gray-300 mb-3">No muscle groups yet — add one below</p>
+              )}
+
+              <div className="flex flex-wrap gap-2 mb-4">
+                {groups.map(g => (
                   <button
                     key={g.id}
                     onClick={() => setMuscleGroupId(g.id)}
@@ -180,8 +214,26 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
                 ))}
               </div>
 
+              {/* Add new muscle group */}
+              <div className="flex gap-2 mb-5 pt-1 border-t border-gray-100">
+                <input
+                  type="text"
+                  placeholder="New muscle group…"
+                  value={newGroupName}
+                  onChange={e => setNewGroupName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addMuscleGroup()}
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-3 text-base text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+                <button
+                  onClick={addMuscleGroup}
+                  disabled={!newGroupName.trim() || addingGroup}
+                  className="px-4 min-h-[44px] bg-teal-50 text-teal-700 text-sm font-medium rounded-lg hover:bg-teal-100 disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+
               <p className="text-xs font-medium text-gray-500 mb-2">Date</p>
-              {/* text-base (16px) prevents iOS auto-zoom on focus */}
               <input
                 type="date"
                 value={date}
@@ -191,12 +243,17 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
             </>
           )}
 
+          {/* ── Step 2 ── */}
           {step === 2 && (
             <>
+              <p className="text-xs text-gray-400 mb-4">
+                Select exercises below, or skip straight to{' '}
+                <span className="font-medium text-gray-500">"Mark as exercised"</span>{' '}
+                to just log the day.
+              </p>
+
               {exercises.map(exercise => (
                 <div key={exercise.id} className="mb-3">
-
-                  {/* 44px exercise toggle */}
                   <button
                     onClick={() => toggleExercise(exercise.id)}
                     className={`w-full flex items-center justify-between px-4 min-h-[44px] rounded-xl border text-sm font-medium transition-colors ${
@@ -214,7 +271,6 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
                       {exercise.sets.map((set, i) => (
                         <div key={i} className="flex items-center gap-2 mb-2">
                           <span className="text-xs text-gray-400 w-10 shrink-0">Set {set.setNumber}</span>
-                          {/* text-base prevents iOS zoom; w-20 accommodates the larger text */}
                           <input
                             type="number"
                             inputMode="decimal"
@@ -250,11 +306,9 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
                       </button>
                     </div>
                   )}
-
                 </div>
               ))}
 
-              {/* Add new exercise */}
               <div className="flex gap-2 mt-5 pt-4 border-t border-gray-100">
                 <input
                   type="text"
@@ -297,10 +351,10 @@ export default function LogSessionModal({ open, onClose, muscleGroups, defaultMu
               </button>
               <button
                 onClick={saveSession}
-                disabled={saving || !canSave}
+                disabled={saving}
                 className="flex-1 bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-teal-50 text-sm font-medium min-h-[44px] rounded-lg"
               >
-                {saving ? 'Saving…' : 'Save session'}
+                {saving ? 'Saving…' : hasExercises ? 'Save session' : 'Mark as exercised'}
               </button>
             </div>
           )}

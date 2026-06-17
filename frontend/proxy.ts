@@ -7,6 +7,10 @@ export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
   const isLoggedIn   = req.cookies.has('auth_flag')
 
+  if (pathname === '/') {
+    return NextResponse.redirect(new URL(isLoggedIn ? '/dashboard' : '/login', req.url))
+  }
+
   if (protectedRoutes.some(r => pathname.startsWith(r)) && !isLoggedIn) {
     return NextResponse.redirect(new URL('/login', req.url))
   }

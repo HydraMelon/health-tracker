@@ -20,14 +20,15 @@ const TABS = ['Overview', 'Workout log']
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [activeTab,       setActiveTab]       = useState(0)
-  const [muscleGroups,    setMuscleGroups]    = useState<MuscleGroup[]>([])
-  const [exercisedDates,  setExercisedDates]  = useState<string[]>([])
-  const [stats,           setStats]           = useState<Stats | null>(null)
-  const [loading,         setLoading]         = useState(true)
-  const [error,           setError]           = useState<string | null>(null)
-  const [modalOpen,       setModalOpen]       = useState(false)
-  const [modalGroupId,    setModalGroupId]    = useState<number | undefined>()
+  const [activeTab,      setActiveTab]      = useState(0)
+  const [muscleGroups,   setMuscleGroups]   = useState<MuscleGroup[]>([])
+  const [exercisedDates, setExercisedDates] = useState<string[]>([])
+  const [stats,          setStats]          = useState<Stats | null>(null)
+  const [loading,        setLoading]        = useState(true)
+  const [error,          setError]          = useState<string | null>(null)
+  const [modalOpen,      setModalOpen]      = useState(false)
+  const [modalGroupId,   setModalGroupId]   = useState<number | undefined>()
+  const [modalDate,      setModalDate]      = useState<string | undefined>()
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -50,8 +51,9 @@ export default function DashboardPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  function openModal(muscleGroupId?: number) {
+  function openModal(muscleGroupId?: number, date?: string) {
     setModalGroupId(muscleGroupId)
+    setModalDate(date)
     setModalOpen(true)
   }
 
@@ -130,12 +132,15 @@ export default function DashboardPage() {
                   <StatCard key={s.label} {...s} />
                 ))}
               </div>
-              <ExerciseCalendar exercisedDates={exercisedDates} />
+              <ExerciseCalendar
+                exercisedDates={exercisedDates}
+                onMarkDay={date => openModal(undefined, date)}
+              />
             </>
           )}
 
           {activeTab === 1 && (
-            <WorkoutLog muscleGroups={muscleGroups} onLogSession={openModal} />
+            <WorkoutLog muscleGroups={muscleGroups} onLogSession={id => openModal(id)} />
           )}
         </>
       )}
@@ -145,6 +150,7 @@ export default function DashboardPage() {
         onClose={() => setModalOpen(false)}
         muscleGroups={muscleGroups}
         defaultMuscleGroupId={modalGroupId}
+        defaultDate={modalDate}
         onSaved={() => loadData(true)}
       />
 

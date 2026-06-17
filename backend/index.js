@@ -74,6 +74,21 @@ app.post('/api/auth/login', async (req, res) => {
 
 // ── Protected endpoints ───────────────────────────────────────────────────────
 
+app.post('/api/muscle-groups', authenticate, async (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'name required' });
+
+  try {
+    const group = await prisma.muscleGroup.create({
+      data: { name: name.trim(), userId: req.user.userId },
+    });
+    res.status(201).json({ id: group.id, name: group.name });
+  } catch (err) {
+    logger.error(`POST /api/muscle-groups — ${err.message}`, { stack: err.stack });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/api/muscle-groups', authenticate, async (req, res) => {
   try {
     const groups = await prisma.muscleGroup.findMany({
@@ -204,7 +219,10 @@ app.get('/api/exercises', authenticate, async (req, res) => {
 
   try {
     const exercises = await prisma.exerciseDefinition.findMany({
-      where: { muscleGroupId },
+      where: {
+        muscleGroupId,
+        muscleGroup: { userId: req.user.userId },   // verify ownership
+      },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
@@ -220,6 +238,11 @@ app.post('/api/exercise-definitions', authenticate, async (req, res) => {
   if (!name || !muscleGroupId) return res.status(400).json({ error: 'name and muscleGroupId required' });
 
   try {
+    const group = await prisma.muscleGroup.findFirst({
+      where: { id: muscleGroupId, userId: req.user.userId },
+    });
+    if (!group) return res.status(403).json({ error: 'Forbidden' });
+
     const exercise = await prisma.exerciseDefinition.create({
       data: { name: name.trim(), muscleGroupId },
     });
@@ -234,16 +257,21 @@ app.post('/api/sessions', authenticate, async (req, res) => {
   const { muscleGroupId, date, exercises } = req.body;
   const userId = req.user.userId;
 
-  if (!muscleGroupId || !date || !exercises?.length) {
-    return res.status(400).json({ error: 'muscleGroupId, date, exercises required' });
+  if (!muscleGroupId || !date) {
+    return res.status(400).json({ error: 'muscleGroupId and date required' });
   }
 
   try {
+    const group = await prisma.muscleGroup.findFirst({
+      where: { id: muscleGroupId, userId },
+    });
+    if (!group) return res.status(403).json({ error: 'Forbidden' });
+
     const session = await prisma.session.create({
       data: { userId, muscleGroupId, date: new Date(date) },
     });
 
-    for (const exercise of exercises) {
+    for (const exercise of (exercises ?? [])) {
       const sessionExercise = await prisma.sessionExercise.create({
         data: { sessionId: session.id, exerciseDefinitionId: exercise.exerciseDefinitionId },
       });
